@@ -281,18 +281,18 @@ class WGAN_GP(object):
 
 					# log
 					if writer is not None:
-						writer.add_scalars('Loss', {'G_loss': G_loss.item(), 'D_loss': -D_loss.item()}, global_step=n_itrs)
+						writer.add_scalars('Loss', {'G_loss': G_loss.item(), 'D_loss': D_loss.item()}, global_step=n_itrs)
 						samples = self.generate()
 						writer.add_image('generated samples', samples, global_step=n_itrs)
 
 					# standard output
 					if n_itrs % 100 == 0:
-						commandline_output = '\r\033[K[itr {:d}] G_loss: {:.4f}, D_loss: {:.4f}, GP_loss: {:.4f}\n'.format(n_itrs, G_running_loss / 100, -D_running_loss / (self.n_critic * 100), GP_running_loss / (self.n_critic * 100))
+						commandline_output = '\r\033[K[itr {:d}] G_loss: {:.4f}, D_loss: {:.4f}, GP_loss: {:.4f}\n'.format(n_itrs, G_running_loss / 100, D_running_loss / (self.n_critic * 100), GP_running_loss / (self.n_critic * 100))
 						D_running_loss = 0.0
 						G_running_loss = 0.0
 						GP_running_loss = 0.0
 					else:
-						commandline_output = '\r\033[K[itr {:d}] G_loss: {:.4f}, D_loss: {:.4f}, GP_loss: {:.4f}'.format(n_itrs, G_loss.item(), -D_loss.item(), gradient_penalty.item())
+						commandline_output = '\r\033[K[itr {:d}] G_loss: {:.4f}, D_loss: {:.4f}, GP_loss: {:.4f}'.format(n_itrs, G_loss.item(), D_loss.item(), gradient_penalty.item())
 					sys.stdout.write(commandline_output)
 					sys.stdout.flush()
 
