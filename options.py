@@ -8,6 +8,11 @@ class BaseOptions():
 		self.initialized = False
 
 	def initialize(self, parser):
+		# model
+		parser.add_argument('--G_act_type', type=str, default='leakyrelu', help='activation type of generator')
+		parser.add_argument('--G_norm_type', type=str, default='batchnorm', help='normalization type of generator')
+		parser.add_argument('--D_act_type', type=str, default='leakyrelu', help='activation type of discriminator')
+		parser.add_argument('--D_norm_type', type=str, default='layernorm', help='normalization type of discriminator')
 		# dataset
 		# parser.add_argument('--dataset', type=str, required=True, help='cifar10 | cifar100 | tiny_imagenet')
 		parser.add_argument('--num_workers', type=int, default=12, help='number of workers')

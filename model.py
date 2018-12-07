@@ -248,8 +248,8 @@ class WGAN_GP(object):
 		self.device = opt.device
 
 		# model
-		self.G = Generator(self.nz, self.nc, self.ngf).to(self.device)
-		self.D = Discriminator(self.nz, self.nc, self.ndf).to(self.device)
+		self.G = Generator(self.nz, self.nc, self.ngf, opt.G_norm_type, opt.G_act_type).to(self.device)
+		self.D = Discriminator(self.nz, self.nc, self.ndf, opt.D_norm_type, opt.D_act_type).to(self.device)
 		if opt.train:
 			initialize_weights(self.G)
 			initialize_weights(self.D)
