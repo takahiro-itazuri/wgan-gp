@@ -1,0 +1,11 @@
+weight initialization
+	previous: normal (mean=0.0, std=0.02)
+	currect: kaiming normal
+
+activation function
+	previous: ReLU
+	current: LeakyReLU
+
+beta2 value of Adam
+	previous: 0.9
+	current: 0.99

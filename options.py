@@ -78,12 +78,14 @@ class TrainOptions(BaseOptions):
 	def initialize(self, parser):
 		parser = BaseOptions.initialize(self, parser)
 		# hyperparameter
-		parser.add_argument('--num_itrs', type=int, default=100000, help='number of iterations')
+		parser.add_argument('--num_itrs', type=int, default=25000, help='number of iterations')
 		parser.add_argument('--lr', type=float, default=2e-4, help='learning rate for Adam')
 		parser.add_argument('--beta1', type=float, default=0.5, help='beta1 for Adam')
-		parser.add_argument('--beta2', type=float, default=0.9, help='beta2 for Adam')
+		parser.add_argument('--beta2', type=float, default=0.999, help='beta2 for Adam')
+		parser.add_argument('--num_critic', type=int, default=5, help='number of critic iteration for one generator iteration')
+		parser.add_argument('--lambda_gp', type=float, default=10, help='coefficient of gradient penalty')
 		# log
-		parser.add_argument('--checkpoint', type=int, default=10000, help='checkpoint iteration')
+		parser.add_argument('--checkpoint', type=int, default=5000, help='checkpoint iteration')
 		return parser
 
 class TestOptions(BaseOptions):

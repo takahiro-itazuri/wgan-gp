@@ -8,8 +8,18 @@ from torch.autograd import grad
 def initialize_weights(model):
 	for m in model.modules():
 		if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
-			m.weight.data.normal_(0, 0.02)
-			m.bias.data.zero_()
+			nn.init.kaiming_normal_(m.weight.data)
+			if m.bias is not None:
+				nn.init.zeros_(m.bias.data)
+		elif isinstance(m, nn.BatchNorm2d):
+			nn.init.uniform_(m.weight.data)
+			nn.init.zeros_(m.bias.data)
+
+
+def adjust_lr(optimizer, initial_lr, final_lr, itr, num_itrs):
+	lr = initial_lr - float(itr) / float(num_itrs) * (initial_lr - final_lr)
+	for param_group in optimizer.param_groups:
+		param_group['lr'] = lr
 
 
 class LayerNorm(nn.Module):
@@ -35,12 +45,21 @@ class LayerNorm(nn.Module):
 		return x
 
 
+class Conv3x3(nn.Module):
+	def __init__(self, in_channels, out_channels, bias=False):
+		super(Conv3x3, self).__init__()
+		self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=bias)
+
+	def forward(self, x):
+		return self.conv(x)
+
+
 class DownConv(nn.Module):
-	def __init__(self, in_channels, out_channels, kernel_size=3, padding=1):
+	def __init__(self, in_channels, out_channels):
 		super(DownConv, self).__init__()
 		self.conv = nn.Sequential(
 			nn.AvgPool2d(kernel_size=2),
-			nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
+			Conv3x3(in_channels, out_channels)
 		)
 
 	def forward(self, x):
@@ -48,10 +67,10 @@ class DownConv(nn.Module):
 
 
 class ConvDown(nn.Module):
-	def __init__(self, in_channels, out_channels, kernel_size=3, padding=1):
+	def __init__(self, in_channels, out_channels):
 		super(ConvDown, self).__init__()
 		self.conv = nn.Sequential(
-			nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding),
+			Conv3x3(in_channels, out_channels),
 			nn.AvgPool2d(kernel_size=2)
 		)
 
@@ -60,11 +79,11 @@ class ConvDown(nn.Module):
 
 
 class UpConv(nn.Module):
-	def __init__(self, in_channels, out_channels, kernel_size=3, padding=1):
+	def __init__(self, in_channels, out_channels):
 		super(UpConv, self).__init__()
 		self.conv = nn.Sequential(
 			nn.Upsample(scale_factor=2),
-			nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
+			Conv3x3(in_channels, out_channels)
 		)
 	
 	def forward(self, x):
@@ -72,41 +91,41 @@ class UpConv(nn.Module):
 
 
 class ResidualBlock(nn.Module):
-	def __init__(self, in_channels, out_channels, NormLayer, resample=None):
+	def __init__(self, in_channels, out_channels, normalization, activation, resample=None):
 		super(ResidualBlock, self).__init__()
 		self.need_shortcut_conv = (in_channels != out_channels) or (resample is not None)
 
 		if resample == 'down':
 			self.conv = nn.Sequential(
-				NormLayer(in_channels),
-				nn.ReLU(inplace=True),
-				nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-				NormLayer(out_channels),
-				nn.ReLU(inplace=True),
-				ConvDown(out_channels, out_channels, kernel_size=3, padding=1)
+				normalization(in_channels),
+				activation(inplace=True),
+				Conv3x3(in_channels, out_channels),
+				normalization(out_channels),
+				activation(inplace=True),
+				ConvDown(out_channels, out_channels)
 			)
-			self.shortcut_conv = ConvDown(in_channels, out_channels, kernel_size=3, padding=1)
+			self.shortcut_conv = ConvDown(in_channels, out_channels)
 		elif resample == 'up':
 			self.conv = nn.Sequential(
-				NormLayer(in_channels),
-				nn.ReLU(inplace=True),
-				UpConv(in_channels, out_channels, kernel_size=3, padding=1),
-				NormLayer(out_channels),
-				nn.ReLU(inplace=True),
-				nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+				normalization(in_channels),
+				activation(inplace=True),
+				UpConv(in_channels, out_channels),
+				normalization(out_channels),
+				activation(inplace=True),
+				Conv3x3(out_channels, out_channels)
 			)
-			self.shortcut_conv = UpConv(in_channels, out_channels, kernel_size=3, padding=1)
+			self.shortcut_conv = UpConv(in_channels, out_channels)
 		elif resample is None:
 			self.conv = nn.Sequential(
-				NormLayer(out_channels),
-				nn.ReLU(inplace=True),
-				nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-				NormLayer(out_channels),
-				nn.ReLU(inplace=True),
-				nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+				normalization(in_channels),
+				activation(inplace=True),
+				Conv3x3(in_channels, out_channels),
+				normalization(out_channels),
+				activation(inplace=True),
+				Conv3x3(out_channels, out_channels)
 			)
 			if self.need_shortcut_conv:
-				self.shortcut_conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+				self.shortcut_conv = Conv3x3(in_channels, out_channels)
 
 	def forward(self, x):
 		if self.need_shortcut_conv:
@@ -120,12 +139,12 @@ class ResidualBlock(nn.Module):
 
 
 class OptimizedBlock(nn.Module):
-	def __init__(self, in_channels, out_channels, NormLayer=LayerNorm):
+	def __init__(self, in_channels, out_channels, normalization, activation):
 		super(OptimizedBlock, self).__init__()
 		self.conv = nn.Sequential(
-			nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-			LayerNorm(out_channels),
-			nn.ReLU(inplace=True),
+			Conv3x3(in_channels, out_channels),
+			normalization(out_channels),
+			activation(inplace=True),
 			ConvDown(out_channels, out_channels)
 		)
 		self.shortcut = DownConv(in_channels, out_channels)
@@ -138,20 +157,20 @@ class OptimizedBlock(nn.Module):
 
 
 class Generator(nn.Module):
-	def __init__(self, nz=128, nc=3, ngf=128):
+	def __init__(self, nz=128, nc=3, ngf=128, normlization=nn.BatchNorm2d, activation=nn.LeakyReLU):
 		super(Generator, self).__init__()
 		self.nz = nz
 		self.nc = nc
 		self.ngf = ngf
 
-		self.fc1 = nn.Linear(nz, 4 * 4 * ngf)
-		self.block2 = ResidualBlock(ngf, ngf, nn.BatchNorm2d, 'up')
-		self.block3 = ResidualBlock(ngf, ngf, nn.BatchNorm2d, 'up')
-		self.block4 = ResidualBlock(ngf, ngf, nn.BatchNorm2d, 'up')
+		self.fc1 = nn.Linear(nz, 4 * 4 * ngf, bias=False)
+		self.block2 = ResidualBlock(ngf, ngf, 'up', normalization, activation)
+		self.block3 = ResidualBlock(ngf, ngf, 'up', normalization, activation)
+		self.block4 = ResidualBlock(ngf, ngf, 'up', normalization, activation)
 		self.block5 = nn.Sequential(
-			nn.BatchNorm2d(ngf),
-			nn.ReLU(inplace=True),
-			nn.Conv2d(ngf, nc, kernel_size=3, padding=1),
+			normalization(ngf),
+			activation(inplace=True),
+			Conv3x3(ngf, nc),
 			nn.Tanh()
 		)
 
@@ -166,18 +185,18 @@ class Generator(nn.Module):
 
 
 class Discriminator(nn.Module):
-	def __init__(self, nz=128, nc=3, ndf=128):
+	def __init__(self, nz=128, nc=3, ndf=128, normalization=LayerNorm, activation=nn.LeakyReLU):
 		super(Discriminator, self).__init__()
 		self.nz = nz
 		self.nc = nc
 		self.ndf = ndf
 		
-		self.block1 = OptimizedBlock(nc, ndf)
-		self.block2 = ResidualBlock(ndf, ndf, LayerNorm, 'down')
-		self.block3 = ResidualBlock(ndf, ndf, LayerNorm, None)
-		self.block4 = ResidualBlock(ndf, ndf, LayerNorm, None)
+		self.block1 = OptimizedBlock(nc, ndf, normalization, activation)
+		self.block2 = ResidualBlock(ndf, ndf, 'down', normalization, activation)
+		self.block3 = ResidualBlock(ndf, ndf, None, normalization, activation)
+		self.block4 = ResidualBlock(ndf, ndf, None, normalization, activation)
 		self.pool5 = nn.Sequential(
-			nn.ReLU(),
+			activation(),
 			nn.AvgPool2d(kernel_size=8)
 		)
 		self.fc6 = nn.Linear(ndf, 1)
@@ -196,8 +215,8 @@ class WGAN_GP(object):
 	def __init__(self, opt):
 		# hyperparameters
 		self.num_samples = 64
-		self.n_critic = 5
-		self.lambd = 10
+		self.num_critic = opt.num_critic
+		self.lambda_gp = opt.lambda_gp
 		self.nz = 128
 		self.nc = 3
 		self.ngf = 128
@@ -222,16 +241,15 @@ class WGAN_GP(object):
 	def train(self, loader, opt, writer=None):
 		self.y_real = torch.ones(opt.batch_size, 1).to(self.device)
 		self.y_fake = torch.zeros(opt.batch_size, 1).to(self.device)
-
-		self.D.train()
-		n_itrs = 0
-		D_running_loss = 0
-		G_running_loss = 0
-		GP_running_loss = 0
+		
+		nitrs = 0
+		running_D_real_loss = 0.0
+		running_D_fake_loss = 0.0
+		running_G_loss = 0.0
+		running_EMD = 0.0
+		running_GP = 0.0
 
 		while True:
-			self.G.train()
-
 			for itr, (x_real, _) in enumerate(loader):
 				if x_real.size(0) != opt.batch_size:
 					break
@@ -240,14 +258,21 @@ class WGAN_GP(object):
 				z = torch.randn((opt.batch_size, self.nz)).to(self.device)
 				
 				# === update D network === #
+				self.D.train()
+				self.G.train()
 				self.D_optimizer.zero_grad()
 
+				# real sample
 				D_real = self.D(x_real)
-				D_real_loss = -torch.mean(D_real)
+				D_real_loss = torch.mean(D_real)
 
-				x_fake = self.G(z)
+				# fake sample
+				x_fake = self.G(z).detach()
 				D_fake = self.D(x_fake)
 				D_fake_loss = torch.mean(D_fake)
+
+				# EMD
+				EMD = D_real_loss - D_fake_loss
 
 				# gradient penalty
 				alpha = torch.rand((opt.batch_size, 1, 1, 1)).to(self.device)
@@ -256,19 +281,17 @@ class WGAN_GP(object):
 
 				D_hat = self.D(x_hat)
 				gradients = grad(outputs=D_hat, inputs=x_hat, grad_outputs=torch.ones(D_hat.size()).to(self.device), create_graph=True, retain_graph=True, only_inputs=True)[0]
+				GP = self.lambda_gp * ((gradients.view(gradients.size(0), -1).norm(2, dim=1) - 1) ** 2).mean()
 
-				gradient_penalty = self.lambd * ((gradients.view(gradients.size(0), -1).norm(2, 1) - 1) ** 2).mean()
-
-				D_loss = D_real_loss + D_fake_loss + gradient_penalty
+				D_loss = -EMD + GP
 				D_loss.backward()
 				self.D_optimizer.step()
-				D_running_loss += D_loss.item()
-				GP_running_loss += gradient_penalty.item()
 
-				if ((itr + 1) % self.n_critic) == 0:
-					n_itrs += 1
+				if ((itr + 1) % self.num_critic) == 0:
+					nitrs += 1
 
 					# === update G === #
+					self.G.train()
 					self.G_optimizer.zero_grad()
 
 					x_fake = self.G(z)
@@ -277,35 +300,46 @@ class WGAN_GP(object):
 					G_loss = -torch.mean(D_fake)
 					G_loss.backward()
 					self.G_optimizer.step()
-					G_running_loss += G_loss.item()
+
+					# # adjust learning rate
+					# adjust_lr(self.D_optimizer, opt.lr, opt.lr / 10, nitrs, opt.num_itrs)
+					# adjust_lr(self.G_optimizer, opt.lr, opt.lr / 10,  nitrs, opt.num_itrs)
 
 					# log
 					if writer is not None:
-						writer.add_scalars('Loss', {'G_loss': G_loss.item(), 'D_loss': D_loss.item()}, global_step=n_itrs)
+						writer.add_scalars('Loss', {'EMD': EMD.item()}, global_step=nitrs)
+						writer.add_scalars('Others', {'D_real_loss': D_real_loss.item(), 'D_fake_loss': D_fake_loss.item(), 'G_loss': G_loss.item(), 'GP': GP.item()}, global_step=nitrs)
 						samples = self.generate()
-						writer.add_image('generated samples', samples, global_step=n_itrs)
+						writer.add_image('generated samples', samples, global_step=nitrs)
 
 					# standard output
-					if n_itrs % 100 == 0:
-						commandline_output = '\r\033[K[itr {:d}] G_loss: {:.4f}, D_loss: {:.4f}, GP_loss: {:.4f}\n'.format(n_itrs, G_running_loss / 100, D_running_loss / (self.n_critic * 100), GP_running_loss / (self.n_critic * 100))
-						D_running_loss = 0.0
-						G_running_loss = 0.0
-						GP_running_loss = 0.0
+					running_EMD += EMD.item()
+					running_D_real_loss += D_real_loss.item()
+					running_D_fake_loss += D_fake_loss.item()
+					running_G_loss += G_loss.item()
+					running_GP += GP.item()
+					if nitrs % 100 == 0:
+						commandline_output = '\r\033[K[itr {:d}] EMD: {:.4f}, D_real_loss: {:.4f}, D_fake_loss: {:.4f}, G_loss: {:.4f}, GP: {:.4f}\n'.format(nitrs, running_EMD / 100, running_D_real_loss / 100, running_D_fake_loss / 100, running_G_loss / 100, running_GP / 100)
+						running_EMD = 0.0
+						running_D_real_loss = 0.0
+						running_D_fake_loss = 0.0
+						running_G_loss = 0.0
+						running_GP = 0.0
 					else:
-						commandline_output = '\r\033[K[itr {:d}] G_loss: {:.4f}, D_loss: {:.4f}, GP_loss: {:.4f}'.format(n_itrs, G_loss.item(), D_loss.item(), gradient_penalty.item())
+						commandline_output = '\r\033[K[itr {:d}] EMD: {:.4f}, D_real_loss: {:.4f}, D_fake_loss: {:.4f}, G_loss: {:.4f}, GP: {:.4f}'.format(nitrs, EMD.item(), D_real_loss.item(), D_fake_loss.item(), G_loss.item(), GP.item())
 					sys.stdout.write(commandline_output)
 					sys.stdout.flush()
 
 				# save model
-				if n_itrs != 0 and n_itrs % opt.checkpoint == 0:
-					G_path = os.path.join(opt.log_dir, 'G_{:d}itr.pkl'.format(n_itrs))
-					D_path = os.path.join(opt.log_dir, 'D_{:d}itr.pkl'.format(n_itrs))
+				if nitrs != 0 and nitrs % opt.checkpoint == 0:
+					G_path = os.path.join(opt.log_dir, 'G_{:d}itr.pkl'.format(nitrs))
+					D_path = os.path.join(opt.log_dir, 'D_{:d}itr.pkl'.format(nitrs))
 					self.save(G_path, D_path)
 
-				if n_itrs == opt.num_itrs:
+				if nitrs == opt.num_itrs:
 					break
 			
-			if n_itrs == opt.num_itrs:
+			if nitrs == opt.num_itrs:
 				break
 
 	def generate(self, fix=True):
