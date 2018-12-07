@@ -45,21 +45,43 @@ class LayerNorm(nn.Module):
 		return x
 
 
-class Conv3x3(nn.Module):
-	def __init__(self, in_channels, out_channels, bias=False):
-		super(Conv3x3, self).__init__()
-		self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=bias)
+def Conv1x1(in_channels, out_channels, bias=False):
+	return nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False)
 
-	def forward(self, x):
-		return self.conv(x)
+
+def Conv3x3(in_channels, out_channels, bias=False):
+	return nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False)
+
+
+def NormLayer(type, num_features, affine=True):
+	if type == 'batchnorm':
+		return nn.BatchNorm2d(num_features, affine=affine)
+	elif type == 'instancenorm':
+		return nn.InstanceNorm2d(num_features, affine=affine)
+	elif type == 'layernorm':
+		return LayerNorm(num_features, affine=affine)
+
+
+def UpLayer(type, scale_factor=2):
+	if type == 'nearest':
+		return nn.UpsamplingNearest2d(scale_factor=scale_factor)
+	elif type == 'bilinear':
+		return nn.UpsamplingBilinear2d(scale_factor=2)
+
+
+def ActLayer(type, negative_slope=0.2):
+	if type == 'relu':
+		return nn.ReLU(inplace=True)
+	elif type == 'leakyrelu':
+		return nn.LeakyReLU(negative_slope=negative_slope, inplace=True)
 
 
 class DownConv(nn.Module):
-	def __init__(self, in_channels, out_channels):
+	def __init__(self, in_channels, out_channels, kernel_size=3):
 		super(DownConv, self).__init__()
 		self.conv = nn.Sequential(
 			nn.AvgPool2d(kernel_size=2),
-			Conv3x3(in_channels, out_channels)
+			Conv3x3(in_channels, out_channels) if (kernel_size == 3) else Conv1x1(in_channels, out_channels)
 		)
 
 	def forward(self, x):
@@ -67,10 +89,10 @@ class DownConv(nn.Module):
 
 
 class ConvDown(nn.Module):
-	def __init__(self, in_channels, out_channels):
+	def __init__(self, in_channels, out_channels, kernel_size=3):
 		super(ConvDown, self).__init__()
 		self.conv = nn.Sequential(
-			Conv3x3(in_channels, out_channels),
+			Conv3x3(in_channels, out_channels) if (kernel_size == 3) else Conv1x1(in_channels, out_channels),
 			nn.AvgPool2d(kernel_size=2)
 		)
 
@@ -79,11 +101,11 @@ class ConvDown(nn.Module):
 
 
 class UpConv(nn.Module):
-	def __init__(self, in_channels, out_channels):
+	def __init__(self, in_channels, out_channels, kernel_size=3):
 		super(UpConv, self).__init__()
 		self.conv = nn.Sequential(
-			nn.Upsample(scale_factor=2),
-			Conv3x3(in_channels, out_channels)
+			nn.UpsamplingNearest2d(scale_factor=2),
+			Conv3x3(in_channels, out_channels) if (kernel_size == 3) else Conv1x1(in_channels, out_channels)
 		)
 	
 	def forward(self, x):
@@ -91,41 +113,41 @@ class UpConv(nn.Module):
 
 
 class ResidualBlock(nn.Module):
-	def __init__(self, in_channels, out_channels, normalization, activation, resample=None):
+	def __init__(self, in_channels, out_channels, norm_type, act_type, resample=None):
 		super(ResidualBlock, self).__init__()
 		self.need_shortcut_conv = (in_channels != out_channels) or (resample is not None)
 
 		if resample == 'down':
 			self.conv = nn.Sequential(
-				normalization(in_channels),
-				activation(inplace=True),
+				NormLayer(norm_type, in_channels),
+				ActLayer(act_type),
 				Conv3x3(in_channels, out_channels),
-				normalization(out_channels),
-				activation(inplace=True),
+				NormLayer(norm_type, out_channels),
+				ActLayer(act_type),
 				ConvDown(out_channels, out_channels)
 			)
-			self.shortcut_conv = ConvDown(in_channels, out_channels)
+			self.shortcut_conv = ConvDown(in_channels, out_channels, kernel_size=1)
 		elif resample == 'up':
 			self.conv = nn.Sequential(
-				normalization(in_channels),
-				activation(inplace=True),
+				NormLayer(norm_type, in_channels),
+				ActLayer(act_type),
 				UpConv(in_channels, out_channels),
-				normalization(out_channels),
-				activation(inplace=True),
+				NormLayer(norm_type, out_channels),
+				ActLayer(act_type),
 				Conv3x3(out_channels, out_channels)
 			)
-			self.shortcut_conv = UpConv(in_channels, out_channels)
+			self.shortcut_conv = UpConv(in_channels, out_channels, kernel_size=1)
 		elif resample is None:
 			self.conv = nn.Sequential(
-				normalization(in_channels),
-				activation(inplace=True),
+				NormLayer(norm_type, in_channels),
+				ActLayer(act_type),
 				Conv3x3(in_channels, out_channels),
-				normalization(out_channels),
-				activation(inplace=True),
+				NormLayer(norm_type, out_channels),
+				ActLayer(act_type),
 				Conv3x3(out_channels, out_channels)
 			)
 			if self.need_shortcut_conv:
-				self.shortcut_conv = Conv3x3(in_channels, out_channels)
+				self.shortcut_conv = Conv1x1(in_channels, out_channels, kernel_size=1)
 
 	def forward(self, x):
 		if self.need_shortcut_conv:
@@ -139,15 +161,15 @@ class ResidualBlock(nn.Module):
 
 
 class OptimizedBlock(nn.Module):
-	def __init__(self, in_channels, out_channels, normalization, activation):
+	def __init__(self, in_channels, out_channels, norm_type, act_type):
 		super(OptimizedBlock, self).__init__()
 		self.conv = nn.Sequential(
 			Conv3x3(in_channels, out_channels),
-			normalization(out_channels),
-			activation(inplace=True),
+			NormLayer(norm_type, out_channels),
+			ActLayer(act_type),
 			ConvDown(out_channels, out_channels)
 		)
-		self.shortcut = DownConv(in_channels, out_channels)
+		self.shortcut = DownConv(in_channels, out_channels, kernel_size=1)
 	
 	def forward(self, x):
 		shortcut = self.shortcut(x)
@@ -157,19 +179,19 @@ class OptimizedBlock(nn.Module):
 
 
 class Generator(nn.Module):
-	def __init__(self, nz=128, nc=3, ngf=128, normlization=nn.BatchNorm2d, activation=nn.LeakyReLU):
+	def __init__(self, nz=128, nc=3, ngf=128, norm_type='batchnorm', act_type='leakyrelu'):
 		super(Generator, self).__init__()
 		self.nz = nz
 		self.nc = nc
 		self.ngf = ngf
 
 		self.fc1 = nn.Linear(nz, 4 * 4 * ngf, bias=False)
-		self.block2 = ResidualBlock(ngf, ngf, 'up', normalization, activation)
-		self.block3 = ResidualBlock(ngf, ngf, 'up', normalization, activation)
-		self.block4 = ResidualBlock(ngf, ngf, 'up', normalization, activation)
+		self.block2 = ResidualBlock(ngf, ngf, norm_type, act_type, 'up')
+		self.block3 = ResidualBlock(ngf, ngf, norm_type, act_type, 'up')
+		self.block4 = ResidualBlock(ngf, ngf, norm_type, act_type, 'up')
 		self.block5 = nn.Sequential(
-			normalization(ngf),
-			activation(inplace=True),
+			NormLayer(norm_type, ngf),
+			ActLayer(act_type),
 			Conv3x3(ngf, nc),
 			nn.Tanh()
 		)
@@ -185,18 +207,19 @@ class Generator(nn.Module):
 
 
 class Discriminator(nn.Module):
-	def __init__(self, nz=128, nc=3, ndf=128, normalization=LayerNorm, activation=nn.LeakyReLU):
+	def __init__(self, nz=128, nc=3, ndf=128, norm_type='instancenorm', act_type='leakyrelu'):
 		super(Discriminator, self).__init__()
 		self.nz = nz
 		self.nc = nc
 		self.ndf = ndf
 		
-		self.block1 = OptimizedBlock(nc, ndf, normalization, activation)
-		self.block2 = ResidualBlock(ndf, ndf, 'down', normalization, activation)
-		self.block3 = ResidualBlock(ndf, ndf, None, normalization, activation)
-		self.block4 = ResidualBlock(ndf, ndf, None, normalization, activation)
+		self.block1 = OptimizedBlock(nc, ndf, norm_type, act_type)
+		self.block2 = ResidualBlock(ndf, ndf, norm_type, act_type, 'down')
+		self.block3 = ResidualBlock(ndf, ndf, norm_type, act_type, None)
+		self.block4 = ResidualBlock(ndf, ndf, norm_type, act_type, None)
 		self.pool5 = nn.Sequential(
-			activation(),
+			NormLayer(norm_type, ndf),
+			ActLayer(act_type),
 			nn.AvgPool2d(kernel_size=8)
 		)
 		self.fc6 = nn.Linear(ndf, 1)
@@ -232,9 +255,6 @@ class WGAN_GP(object):
 			initialize_weights(self.D)
 			self.G_optimizer = optim.Adam(self.G.parameters(), lr=opt.lr, betas=(opt.beta1, opt.beta2))
 			self.D_optimizer = optim.Adam(self.D.parameters(), lr=opt.lr, betas=(opt.beta1, opt.beta2))
-		
-		print(self.G)
-		print(self.D)
 
 		self.sample_z = torch.randn((self.num_samples, self.nz)).to(self.device)
 
@@ -284,7 +304,7 @@ class WGAN_GP(object):
 				GP = self.lambda_gp * ((gradients.view(gradients.size(0), -1).norm(2, dim=1) - 1) ** 2).mean()
 
 				D_loss = -EMD + GP
-				D_loss.backward()
+				D_loss.backward(retain_graph=True)
 				self.D_optimizer.step()
 
 				if ((itr + 1) % self.num_critic) == 0:
