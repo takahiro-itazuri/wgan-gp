@@ -340,7 +340,7 @@ class ResBlock64(nn.Module):
 		if resample == 'down' or resample == None:
 			self.norm2 = NormLayer(norm_type, in_channels, num_classes)
 		elif resample == 'up':
-			self.norm2 = NornLayer(norm_type, out_channels, num_classes)
+			self.norm2 = NormLayer(norm_type, out_channels, num_classes)
 
 	def forward(self, x, t=None):
 		o = self.norm1(x, t) if self.condition else self.norm1(x)
