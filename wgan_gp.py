@@ -9,93 +9,7 @@ from torch.autograd import grad
 from torch.nn import functional as F
 from torchvision.utils import make_grid
 
-
-class ConditionalBatchNorm2d(nn.Module):
-	def __init__(self, num_features, num_classes, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True):
-		super(ConditionalBatchNorm2d, self).__init__()
-		self.num_features = num_features
-		self.num_classes = num_classes
-		self.eps = eps
-		self.momentum = momentum
-		self.affine = affine
-		self.track_running_stats = track_running_stats
-		if self.affine:
-			self.weight = nn.Parameter(torch.Tensor(num_classes, num_features))
-			self.bias = nn.Parameter(torch.Tensor(num_classes, num_features))
-		else:
-			self.register_parameter('weight', None)
-			self.register_parameter('bias', None)
-		if self.track_running_stats:
-			self.register_buffer('running_mean', torch.zeros(num_features))
-			self.register_buffer('running_var', torch.ones(num_features))
-			self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
-		else:
-			self.register_parameter('running_mean', None)
-			self.register_parameter('running_var', None)
-			self.register_parameter('num_batches_tracked', None)
-		self.reset_paraemters()
-
-	def reset_runnging_stats(self):
-		if self.track_running_stats:
-			self.running_mean.zero_()
-			self.running_var.fill_(1)
-			self.num_batches_tracked.zero_()
-
-	def reset_paraemters(self):
-		self.reset_runnging_stats()
-		if self.affine:
-			self.weight.data.uniform_()
-			self.bias.data.zero_()
-
-	def _check_input_dim(self, input):
-		if input.dim() != 4:
-			raise ValueError('expected 4D input (got {}D input)'.format(input.dim()))
-
-	def forward(self, input, label):
-		self._check_input_dim(input)
-
-		exponential_average_factor = 0.0
-
-		if self.training and self.track_running_stats:
-			self.num_batches_tracked += 1
-			if self.momentum is None:
-				exponential_average_factor = 1.0 / self.num_batches_tracked.item()
-			else:
-				exponential_average_factor = self.momentum
-		
-		out = F.batch_norm(input, self.running_mean, self.running_var, None, None, self.training or not self.track_running_stats, exponential_average_factor, self.eps)
-		if self.affine:
-			shape = [input.size(0), self.num_features] + (input.dim() - 2) * [1]
-			weight = self.weight.index_select(0, label.long()).view(shape)
-			bias = self.bias.index_select(0, label.long()).view(shape)
-			out = out * weight + bias
-		return out
-
-	def __repr__(self):
-		return ('{name}({num_features}, eps={eps}, momentum={momentum})'.format(name=self.__class__.__name__, **self.__dict__))
-
-
-class LayerNorm(nn.Module):
-	def __init__(self, num_features, eps=1e-5, affine=True):
-		super(LayerNorm, self).__init__()
-		self.eps = eps
-		self.affine = affine
-
-		if self.affine:
-			self.gamma = nn.Parameter(torch.ones(num_features))
-			self.beta = nn.Parameter(torch.zeros(num_features))
-	
-	def forward(self, x):
-		shape = [-1] + [1] * (x.dim() - 1)
-		mean = x.view(x.size(0), -1).mean(1).view(*shape)
-		std = x.view(x.size(0), -1).std(1).view(*shape)
-		x = (x - mean) / (std + self.eps)
-		
-		if self.affine:
-			shape = [1, -1] + [1] * (x.dim() - 2)
-			x = self.gamma.view(*shape) * x + self.beta.view(*shape)
-
-		return x
+from layers import ConditionalBatchNorm2d, LayerNorm
 
 
 def NormLayer(type, num_features, num_classes=-1, affine=True):
@@ -360,7 +274,7 @@ class ResBlock64(nn.Module):
 
 
 class Generator64(nn.Module):
-	def __init__(self, nz, nc, ngf, norm_type='batchnorm', act_type='leakyrelu', num_classes=-1):
+	def __init__(self, nz, nc, ngf, norm_type='batchnorm', act_type='relu', num_classes=-1):
 		super(Generator64, self).__init__()
 		self.nz = nz
 		self.nc = nc
@@ -392,7 +306,7 @@ class Generator64(nn.Module):
 
 
 class Critic64(nn.Module):
-	def __init__(self, nz, nc, ndf, norm_type='instancenorm', act_type='leakyrelu', num_classes=-1):
+	def __init__(self, nz, nc, ndf, norm_type='instancenorm', act_type='relu', num_classes=-1):
 		super(Critic64, self).__init__()
 		self.nz = nz
 		self.nc = nc
@@ -439,13 +353,6 @@ def initialize_weights(model):
 				nn.init.constant_(m.bias, 0.0)
 
 
-def adjust_lr(optimizer, initial_lr, final_lr, itr, num_itrs):
-	lr = initial_lr - float(itr) / float(num_itrs) * (initial_lr - final_lr)
-	for param_group in optimizer.param_groups:
-		param_group['lr'] = lr
-
-
-
 class WGAN_GP(object):
 	def __init__(self, opt):
 		# hyperparameters
@@ -488,9 +395,6 @@ class WGAN_GP(object):
 		
 		self.G = self.G.to(self.device)
 		self.C = self.C.to(self.device)
-
-		print(self.G)
-		print(self.C)
 
 		if opt.train:
 			initialize_weights(self.G)

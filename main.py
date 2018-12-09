@@ -7,7 +7,7 @@ from torchvision import datasets, transforms
 from tensorboardX import SummaryWriter
 
 from options import TrainOptions
-from model import WGAN_GP
+from wgan_gp import WGAN_GP
 
 def main():
 	opt = TrainOptions().parse()
