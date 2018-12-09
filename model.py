@@ -411,6 +411,7 @@ class Critic64(nn.Module):
 			self.ac = nn.Linear(4 * 4 * 8 * ndf, num_classes)
 
 	def forward(self, x):
+		x = self.first(x)
 		x = self.block1(x)
 		x = self.block2(x)
 		x = self.block3(x)
