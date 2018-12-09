@@ -478,11 +478,15 @@ class WGAN_GP(object):
 				self.C = Critic64(self.nz, self.nc, self.ndf, opt.C_norm_type, opt.C_act_type)
 
 		if torch.cuda.device_count() > 1:
+			print('multiple GPU mode!')
 			self.G = nn.DataParallel(self.G)
 			self.C = nn.DataParallel(self.C)
 		
 		self.G = self.G.to(self.device)
 		self.C = self.C.to(self.device)
+
+		print(self.G)
+		print(self.C)
 
 		if opt.train:
 			initialize_weights(self.G)
