@@ -269,9 +269,9 @@ class Generator32(nn.Module):
 		return x
 
 
-class Discriminator32(nn.Module):
+class Critic32(nn.Module):
 	def __init__(self, nz, nc, ndf, norm_type='instancenorm', act_type='leakyrelu', num_classes=-1):
-		super(Discriminator32, self).__init__()
+		super(Critic32, self).__init__()
 		self.nz = nz
 		self.nc = nc
 		self.ndf = ndf
@@ -388,9 +388,9 @@ class Generator64(nn.Module):
 		return x
 
 
-class Discriminator64(nn.Module):
+class Critic64(nn.Module):
 	def __init__(self, nz, nc, ndf, norm_type='instancenorm', act_type='leakyrelu', num_classes=-1):
-		super(Discriminator64, self).__init__()
+		super(Critic64, self).__init__()
 		self.nz = nz
 		self.nc = nc
 		self.ndf = ndf
@@ -465,30 +465,30 @@ class WGAN_GP(object):
 		if self.condition:
 			if self.input_size == 32:
 				self.G = Generator32(self.nz, self.nc, self.ngf, opt.G_norm_type, opt.G_act_type, self.num_classes)
-				self.D = Discriminator32(self.nz, self.nc, self.ndf, opt.D_norm_type, opt.D_act_type, self.num_classes)
+				self.C = Critic32(self.nz, self.nc, self.ndf, opt.C_norm_type, opt.C_act_type, self.num_classes)
 			elif self.input_size == 64:
 				self.G = Generator64(self.nz, self.nc, self.ngf, opt.G_norm_type, opt.G_act_type, self.num_classes)
-				self.D = Discriminator64(self.nz, self.nc, self.ndf, opt.D_norm_type, opt.D_act_type, self.num_classes)
+				self.C = Critic64(self.nz, self.nc, self.ndf, opt.C_norm_type, opt.C_act_type, self.num_classes)
 		else:
 			if self.input_size == 32:
 				self.G = Generator32(self.nz, self.nc, self.ngf, opt.G_norm_type, opt.G_act_type)
-				self.D = Discriminator32(self.nz, self.nc, self.ndf, opt.D_norm_type, opt.D_act_type)
+				self.C = Critic32(self.nz, self.nc, self.ndf, opt.C_norm_type, opt.C_act_type)
 			elif self.input_size == 64:
 				self.G = Generator64(self.nz, self.nc, self.ngf, opt.G_norm_type, opt.G_act_type)
-				self.D = Discriminator64(self.nz, self.nc, self.ndf, opt.D_norm_type, opt.D_act_type)
+				self.C = Critic64(self.nz, self.nc, self.ndf, opt.C_norm_type, opt.C_act_type)
 
 		if torch.cuda.device_count() > 1:
 			self.G = nn.DataParallel(self.G)
-			self.D = nn.DataParallel(self.D)
+			self.C = nn.DataParallel(self.C)
 		
 		self.G = self.G.to(self.device)
-		self.D = self.D.to(self.device)
+		self.C = self.C.to(self.device)
 
 		if opt.train:
 			initialize_weights(self.G)
-			initialize_weights(self.D)
+			initialize_weights(self.C)
 			self.G_optimizer = optim.Adam(self.G.parameters(), lr=opt.lr, betas=(opt.beta1, opt.beta2))
-			self.D_optimizer = optim.Adam(self.D.parameters(), lr=opt.lr, betas=(opt.beta1, opt.beta2))
+			self.C_optimizer = optim.Adam(self.C.parameters(), lr=opt.lr, betas=(opt.beta1, opt.beta2))
 
 		# criterion
 		if self.condition:
@@ -527,29 +527,29 @@ class WGAN_GP(object):
 					# t_onehot = torch.zeros((opt.batch_size, self.num_classes)).scatter_(1, t.type(torch.LongTensor).unsqueeze(1), 1).to(self.device)
 
 				# === update D network === #
-				self.D.train()
+				self.C.train()
 				self.G.train()
-				self.D_optimizer.zero_grad()
+				self.C_optimizer.zero_grad()
 				if self.condition:
-					D_real, t_real = self.D(x_real)
-					D_real_loss = torch.mean(D_real)
+					C_real, t_real = self.C(x_real)
+					C_real = torch.mean(C_real)
 					AC_real_loss = self.ac_loss(t_real, t)
 
 					x_fake = self.G(z, t).detach()
-					D_fake, t_fake = self.D(x_fake)
-					D_fake_loss = torch.mean(D_fake)
+					C_fake, t_fake = self.C(x_fake)
+					C_fake = torch.mean(C_fake)
 					AC_fake_loss = self.ac_loss(t_fake, t)
 
 					AC_loss = AC_real_loss + AC_fake_loss
 				else:
-					D_real = self.D(x_real)
-					D_real_loss = torch.mean(D_real)
+					C_real = self.C(x_real)
+					C_real = torch.mean(C_real)
 
 					x_fake = self.G(z).detach()
-					D_fake = self.D(x_fake)
-					D_fake_loss = torch.mean(D_fake)
+					C_fake = self.C(x_fake)
+					C_fake = torch.mean(C_fake)
 				# EMD
-				EMD = D_real_loss - D_fake_loss
+				EMD = C_real - C_fake
 
 				# gradient penalty
 				alpha = torch.rand((opt.batch_size, 1, 1, 1)).to(self.device)
@@ -557,18 +557,18 @@ class WGAN_GP(object):
 				x_hat.requires_grad = True
 
 				if self.condition:
-					D_hat, _ = self.D(x_hat)
+					C_hat, _ = self.C(x_hat)
 				else:
-					D_hat = self.D(x_hat)
-				gradients = grad(outputs=D_hat, inputs=x_hat, grad_outputs=torch.ones(D_hat.size()).to(self.device), create_graph=True, retain_graph=True, only_inputs=True)[0]
+					C_hat = self.C(x_hat)
+				gradients = grad(outputs=C_hat, inputs=x_hat, grad_outputs=torch.ones(C_hat.size()).to(self.device), create_graph=True, retain_graph=True, only_inputs=True)[0]
 				GP = self.lambda_gp * ((gradients.view(gradients.size(0), -1).norm(2, dim=1) - 1) ** 2).mean()
 
 				if self.condition:
-					D_loss = -EMD + GP + AC_loss
+					C_loss = -EMD + GP + AC_loss
 				else:
-					D_loss = -EMD + GP
-				D_loss.backward()
-				self.D_optimizer.step()
+					C_loss = -EMD + GP
+				C_loss.backward()
+				self.C_optimizer.step()
 
 				if ((i + 1) % self.num_critic) == 0:
 					itr += 1
@@ -579,15 +579,15 @@ class WGAN_GP(object):
 
 					if self.condition:
 						x_fake = self.G(z, t)
-						D_fake, t_fake = self.D(x_fake)
-						D_fake_loss = torch.mean(D_fake)
+						C_fake, t_fake = self.C(x_fake)
+						C_fake = torch.mean(C_fake)
 						AC_fake_loss = self.ac_loss(t_fake, t)
-						G_loss = -D_fake_loss + AC_fake_loss
+						G_loss = -C_fake + AC_fake_loss
 					else:
 						x_fake = self.G(z)
-						D_fake = self.D(x_fake)
-						D_fake_loss = torch.mean(x_fake)
-						G_loss = -D_fake_loss
+						C_fake = self.C(x_fake)
+						C_fake = torch.mean(x_fake)
+						G_loss = -C_fake
 
 					G_loss.backward()
 					self.G_optimizer.step()
@@ -595,7 +595,7 @@ class WGAN_GP(object):
 					# log
 					if writer is not None:
 						writer.add_scalars('Loss', {'EMD': EMD.item()}, global_step=itr)
-						writer.add_scalars('Others', {'D_real_loss': D_real_loss.item(), 'D_fake_loss': D_fake_loss.item(), 'G_loss': G_loss.item(), 'GP': GP.item()}, global_step=itr)
+						writer.add_scalars('Others', {'C_real': C_real.item(), 'C_fake': C_fake.item(), 'GP': GP.item()}, global_step=itr)
 						if self.condition:
 							writer.add_scalars('Loss', {'AC_loss': AC_loss.item()}, global_step=itr)
 							writer.add_scalars('Others', {'AC_real_loss': AC_real_loss.item(), 'AC_fake_loss': AC_fake_loss.item()}, global_step=itr)
@@ -623,8 +623,8 @@ class WGAN_GP(object):
 				# save model
 				if itr % opt.checkpoint == 0:
 					G_path = os.path.join(opt.log_dir, 'G_{:d}itr.pkl'.format(itr))
-					D_path = os.path.join(opt.log_dir, 'D_{:d}itr.pkl'.format(itr))
-					self.save(G_path, D_path)
+					C_path = os.path.join(opt.log_dir, 'C_{:d}itr.pkl'.format(itr))
+					self.save(G_path, C_path)
 
 				if itr == opt.num_itrs:
 					break
@@ -648,10 +648,10 @@ class WGAN_GP(object):
 
 		return (samples + 1.) / 2.
 
-	def save(self, G_path, D_path):
+	def save(self, G_path, C_path):
 		torch.save(self.G.state_dict(), G_path)
-		torch.save(self.D.state_dict(), D_path)
+		torch.save(self.C.state_dict(), C_path)
 
-	def load(self, G_path, D_path):
+	def load(self, G_path, C_path):
 		self.G.load_state_dict(torch.load(G_path))
-		self.D.load_state_dict(torch.load(D_path))
+		self.C.load_state_dict(torch.load(C_path))

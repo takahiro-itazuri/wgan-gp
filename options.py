@@ -11,8 +11,8 @@ class BaseOptions():
 		# model
 		parser.add_argument('--G_act_type', type=str, default='relu', help='activation type of generator')
 		parser.add_argument('--G_norm_type', type=str, default='batchnorm', help='normalization type of generator')
-		parser.add_argument('--D_act_type', type=str, default='relu', help='activation type of discriminator')
-		parser.add_argument('--D_norm_type', type=str, default='layernorm', help='normalization type of discriminator')
+		parser.add_argument('--C_act_type', type=str, default='relu', help='activation type of critic')
+		parser.add_argument('--C_norm_type', type=str, default='layernorm', help='normalization type of critic')
 		parser.add_argument('--condition', action='store_true', default=False, help='conditional version')
 		# dataset
 		parser.add_argument('--dataset', type=str, default='cifar10', help='cifar10 | cifar100 | stl10')
