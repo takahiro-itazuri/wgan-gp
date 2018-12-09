@@ -9,12 +9,13 @@ class BaseOptions():
 
 	def initialize(self, parser):
 		# model
-		parser.add_argument('--G_act_type', type=str, default='leakyrelu', help='activation type of generator')
+		parser.add_argument('--G_act_type', type=str, default='relu', help='activation type of generator')
 		parser.add_argument('--G_norm_type', type=str, default='batchnorm', help='normalization type of generator')
-		parser.add_argument('--D_act_type', type=str, default='leakyrelu', help='activation type of discriminator')
+		parser.add_argument('--D_act_type', type=str, default='relu', help='activation type of discriminator')
 		parser.add_argument('--D_norm_type', type=str, default='layernorm', help='normalization type of discriminator')
+		parser.add_argument('--condition', action='store_true', default=False, help='conditional version')
 		# dataset
-		# parser.add_argument('--dataset', type=str, required=True, help='cifar10 | cifar100 | tiny_imagenet')
+		parser.add_argument('--dataset', type=str, default='cifar10', help='cifar10 | cifar100 | stl10')
 		parser.add_argument('--num_workers', type=int, default=12, help='number of workers')
 		# hyperparameter
 		parser.add_argument('--batch_size', type=int, default=64, help='batch size')
@@ -59,12 +60,25 @@ class BaseOptions():
 
 	def parse(self):
 		opt = self.gather_options()
+		if opt.condition:
+			opt.G_norm_type = 'conditional_batchnorm'
+
 		self.print_options(opt)
 
 		if self.__class__.__name__ == 'TrainOptions':
 			opt.train = True
 		else:
 			opt.train = False
+
+		if opt.dataset == 'cifar10':
+			opt.num_classes = 10
+			opt.input_size = 32
+		elif opt.dataset == 'cifar100':
+			opt.num_classes = 100
+			opt.input_size = 32
+		elif opt.dataset == 'stl10':
+			opt.num_classes = 10
+			opt.input_size = 64
 
 		# GPU
 		if opt.use_gpu and torch.cuda.is_available():

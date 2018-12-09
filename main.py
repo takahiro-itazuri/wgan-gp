@@ -17,10 +17,17 @@ def main():
 
 	# dataset
 	transform = transforms.Compose([
+		transforms.Resize((opt.input_size, opt.input_size)),
+		transforms.RandomHorizontalFlip(),
 		transforms.ToTensor(),
 		transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
 	])
-	dataset = torchvision.datasets.CIFAR10('data', train=True, download=True, transform=transform)
+	if opt.dataset == 'cifar10':
+		dataset = torchvision.datasets.CIFAR10('data', train=True, download=True, transform=transform)
+	elif opt.dataset == 'cifar100':
+		dataset = torchvision.datasets.CIFAR100('data', train=True, download=True, transform=transform)
+	elif opt.dataset == 'stl10':
+		dataset = torchvision.datasets.STL10('data', split='train', download=True, transform=transform)
 	loader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=True, num_workers=opt.num_workers)
 
 	# model
